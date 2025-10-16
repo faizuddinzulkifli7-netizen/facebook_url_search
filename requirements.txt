@@ -4,6 +4,7 @@ python-multipart
 pandas
 openpyxl
 xlrd
+google-api-python-client
 openai
 pydantic
 python-dotenv

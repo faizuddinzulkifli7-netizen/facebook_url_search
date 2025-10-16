@@ -1,17 +1,23 @@
 # Facebook URL Search Automation Tool
 
-🔍 **Web-based automation tool powered by OpenAI API** that automatically finds official Facebook business pages (or groups) for a list of businesses.
+🔍 **Web-based automation tool powered by Google Search API + AI Agent** that automatically finds official Facebook business pages (or groups) for a list of businesses.
 
 ## 📋 Features
 
 - ✅ Upload CSV or Excel files with business names and locations
-- ✅ Automatic Facebook page/group search using OpenAI API
-- ✅ Smart preference for official business Pages over Groups
-- ✅ Confidence scoring for match quality
-- ✅ Batch processing with rate limiting
-- ✅ Real-time progress tracking
-- ✅ Download structured CSV results
-- ✅ Beautiful, user-friendly web interface
+- ✅ **Hybrid approach**: Google Search API + AI-powered filtering
+- ✅ **AI Agent** (GPT-4o-mini) intelligently analyzes and selects best Facebook URL
+- ✅ Customizable Google property (google.com, google.it, google.co.uk, etc.) and language
+- ✅ Smart URL filtering (excludes /about, /posts, /photos, /media, etc.)
+- ✅ Context-aware decision making with detailed AI reasoning
+- ✅ Advanced URL categorization (page/group/other)
+- ✅ Intelligent name matching with variations and abbreviations
+- ✅ Confidence scoring with transparent reasoning
+- ✅ Automatic fallback to rule-based filtering if AI unavailable
+- ✅ Batch processing with progress tracking
+- ✅ Real-time progress monitoring
+- ✅ Download structured CSV results with AI reasoning
+- ✅ Beautiful, modern web interface
 
 ## 🎯 Output Format
 
@@ -31,7 +37,9 @@ The tool generates a CSV file with the following columns:
 ### Prerequisites
 
 - Python 3.8 or higher
-- OpenAI API key (get one at https://platform.openai.com/api-keys)
+- **Google API key** (get one at https://console.cloud.google.com/apis/credentials)
+- **Google Custom Search Engine ID** (create one at https://programmablesearchengine.google.com/)
+- **OpenAI API key** (get one at https://platform.openai.com/api-keys) - for AI-powered filtering
 
 ### Installation
 
@@ -42,28 +50,55 @@ The tool generates a CSV file with the following columns:
 pip install -r requirements.txt
 ```
 
-3. **Set up your OpenAI API key**
+3. **Set up your API credentials**
 
-Create a `.env` file in the project root:
-```bash
-cp .env.example .env
+Create a `.env` file in the project root with your credentials:
+```
+GOOGLE_API_KEY=your_google_api_key_here
+GOOGLE_CSE_ID=your_custom_search_engine_id_here
+OPENAI_API_KEY=sk-your-openai-api-key-here
 ```
 
-Edit `.env` and add your OpenAI API key:
-```
-OPENAI_API_KEY=sk-your-actual-api-key-here
-```
+#### How to get Google API credentials:
 
-Alternatively, set it as an environment variable:
+**Step 1: Get Google API Key**
+1. Go to [Google Cloud Console](https://console.cloud.google.com/)
+2. Create a new project or select an existing one
+3. Enable the "Custom Search API"
+4. Go to "Credentials" and create an API key
+
+**Step 2: Create Custom Search Engine**
+1. Go to [Programmable Search Engine](https://programmablesearchengine.google.com/)
+2. Click "Add" to create a new search engine
+3. For "Sites to search", enter: `www.facebook.com/*`
+4. Give it a name (e.g., "Facebook Search")
+5. Click "Create"
+6. Copy the "Search engine ID" (this is your GOOGLE_CSE_ID)
+
+**Step 3: Get OpenAI API Key** (for AI filtering)
+1. Go to [OpenAI Platform](https://platform.openai.com/)
+2. Sign up or log in
+3. Go to API Keys section
+4. Click "Create new secret key"
+5. Copy the key (starts with `sk-proj-` or `sk-`)
+6. This is your OPENAI_API_KEY
+
+Alternatively, set as environment variables:
 ```bash
 # Windows (PowerShell)
-$env:OPENAI_API_KEY="sk-your-actual-api-key-here"
+$env:GOOGLE_API_KEY="your_api_key_here"
+$env:GOOGLE_CSE_ID="your_cse_id_here"
+$env:OPENAI_API_KEY="sk-your-openai-key-here"
 
 # Windows (CMD)
-set OPENAI_API_KEY=sk-your-actual-api-key-here
+set GOOGLE_API_KEY=your_api_key_here
+set GOOGLE_CSE_ID=your_cse_id_here
+set OPENAI_API_KEY=sk-your-openai-key-here
 
 # Linux/Mac
-export OPENAI_API_KEY=sk-your-actual-api-key-here
+export GOOGLE_API_KEY=your_api_key_here
+export GOOGLE_CSE_ID=your_cse_id_here
+export OPENAI_API_KEY=sk-your-openai-key-here
 ```
 
 4. **Run the application**
@@ -92,10 +127,19 @@ Your input file (CSV or Excel) should have **two columns**:
 
 ### Using the Web Interface
 
-1. **Upload your file** - Click "Choose File" and select your CSV or Excel file
-2. **Start processing** - Click "Start Processing" button
-3. **Monitor progress** - Watch the real-time progress bar
-4. **Download results** - Once complete, click "Download Results CSV"
+1. **Configure search settings** - Select Google property (domain) and language
+2. **Upload your file** - Click "Choose File" and select your CSV or Excel file
+3. **Start processing** - Click "Start Processing" button
+4. **Monitor progress** - Watch the real-time progress bar
+5. **Download results** - Once complete, click "Download Results CSV"
+
+### Google Search Configuration
+
+The tool allows you to customize:
+- **Google Property**: Choose which Google domain to use (google.com, google.it, google.co.uk, etc.)
+- **Language**: Select the search language (en, it, fr, es, de, etc.)
+
+This is useful for finding localized Facebook pages based on your target region.
 
 ### Sample File
 
@@ -103,37 +147,47 @@ A sample input file (`sample_input.csv`) is included in the repository for testi
 
 ## ⚙️ Configuration
 
-### API Model Selection
+### Search Results Limit
 
-The tool uses `gpt-4o` by default for **best web search integration**. This model has built-in web search capabilities that provide more accurate, real-time results.
+The tool retrieves up to **20 results per search** from Google (Note: Google API allows max 10 per request).
 
-To use a different model, edit `main.py`:
+To adjust, edit `main.py` around line 338:
 
 ```python
-# Line ~95 in main.py
-response = await asyncio.to_thread(
-    openai.chat.completions.create,
-    model="gpt-4o",  # Options: "gpt-4o-mini", "gpt-4-turbo", "gpt-4o"
+result = google_service.cse().list(
+    q=search_query,
+    cx=GOOGLE_CSE_ID,
+    num=min(num_results, 10),  # Change this value (max 10)
     ...
-)
+).execute()
 ```
 
-**Model recommendations:**
-- **gpt-4o** (default): Best web search, most accurate results
-- **gpt-4o-mini**: More cost-effective, slightly less accurate
-- **gpt-4-turbo**: Good balance of cost and performance
+### URL Quality Scoring
+
+The tool uses intelligent URL filtering to avoid "bad" URLs:
+- Excludes URLs with `/about`, `/posts`, `/photos`, `/media`, `/videos`, etc.
+- Penalizes personal profiles (`profile.php`)
+- Slightly penalizes groups (acceptable but not ideal)
+- Prioritizes clean business page URLs
+
+You can customize the bad patterns in `main.py` around line 78:
+
+```python
+BAD_URL_PATTERNS = [
+    r'/about/?$',
+    r'/posts/?',
+    # Add or remove patterns here
+]
+```
 
 ### Rate Limiting
 
-Default: **5 concurrent requests** with 0.5s delay between requests.
+Default: **0.5 second delay** between requests to avoid API rate limits.
 
-To adjust, edit `main.py` (line ~180):
+To adjust, edit `main.py` around line 454:
 
 ```python
-# Adjust concurrency
-semaphore = asyncio.Semaphore(5)  # Change number
-
-# Adjust delay
+# Small delay to avoid rate limiting
 await asyncio.sleep(0.5)  # Change delay in seconds
 ```
 
@@ -168,7 +222,7 @@ Expected response:
 ```json
 {
   "status": "healthy",
-  "openai_api_configured": true
+  "google_api_configured": true
 }
 ```
 
@@ -185,56 +239,125 @@ Expected response:
 ## 🛠️ Technology Stack
 
 - **Backend**: FastAPI (Python)
-- **AI**: OpenAI GPT-4o API with **Web Search**
+- **Search API**: Google Custom Search JSON API
+- **AI Engine**: OpenAI GPT-4o-mini (for intelligent filtering)
 - **Data Processing**: Pandas
 - **File Handling**: openpyxl, xlrd
 - **Async Processing**: asyncio
 - **Frontend**: HTML/CSS/JavaScript (vanilla)
 
-### Web Search Integration
+### Hybrid Architecture: Google Search + AI Agent
 
-This tool leverages OpenAI's **built-in web search capabilities** to find real-time, accurate Facebook URLs. The AI model:
-- ✅ Actually searches the web (site:facebook.com)
-- ✅ Returns current, active Facebook pages
-- ✅ Validates location matches
-- ✅ Distinguishes between pages and groups
-- ✅ Provides confidence scores based on match quality
+This tool uses a **2-stage approach** for maximum accuracy:
 
-**📖 For detailed information about how web search works, see [WEB_SEARCH_GUIDE.md](WEB_SEARCH_GUIDE.md)**
+#### Stage 1: Google Search API
+- ✅ Direct Google search with `site:facebook.com` restriction
+- ✅ Customizable Google property and language
+- ✅ Retrieves up to 10 real-time Facebook results
+- ✅ Returns URLs with titles and descriptions
+
+#### Stage 2: AI-Powered Filtering
+- ✅ **AI Agent** analyzes all search results
+- ✅ Context-aware decision making
+- ✅ Understands business name variations
+- ✅ Applies intelligent filtering rules
+- ✅ Selects best matching URL
+- ✅ Provides detailed reasoning
+- ✅ Automatic fallback to rule-based if AI unavailable
+
+### URL Categorization Logic
+
+The tool categorizes Facebook URLs into three types:
+
+1. **page** - Business pages:
+   - `facebook.com/BusinessName/` (username pattern)
+   - `facebook.com/p/Business-Name-12345/` (modern /p/ pattern)
+
+2. **group** - Facebook groups:
+   - `facebook.com/groups/GroupName/`
+
+3. **other** - Personal profiles or unclear:
+   - `facebook.com/profile.php?id=12345`
+   - Any URL that doesn't match page or group patterns
+
+### Confidence Scoring
+
+Confidence scores (0.0 to 1.0) are calculated based on:
+- **URL Quality Score (40%)**: Clean URL structure, no bad paths
+- **Name Match Score (60%)**: How well business name matches URL and metadata
+
+**Score interpretation:**
+- **0.8-1.0**: Excellent match (high confidence)
+- **0.6-0.8**: Good match
+- **0.4-0.6**: Moderate match
+- **0.0-0.4**: Low confidence (manual review recommended)
 
 ## 💰 Cost Estimation
 
-Using **GPT-4o** (recommended for web search):
-- ~$2.50 per million input tokens
-- ~$10.00 per million output tokens
+### Google Custom Search JSON API
+- **Free tier**: 100 queries per day
+- **Paid**: $5 per 1,000 queries (after free tier)
+- **Cost per business**: ~$0.005
 
-**Estimated cost per business**: ~$0.01-0.02 (1-2 cents with web search)
+### OpenAI API (GPT-4o-mini for AI filtering)
+- **Input**: ~500 tokens per request (~$0.000075)
+- **Output**: ~100 tokens per request (~$0.000060)
+- **Cost per business**: ~$0.000135 (negligible!)
 
-For **100 businesses**: ~$1-2
-For **1000 businesses**: ~$10-20
+### Total Cost per Business
+- Google API: $0.005
+- OpenAI AI filtering: $0.000135
+- **Total**: ~**$0.0051 per business**
 
-**Note**: Web search functionality uses more tokens but provides significantly more accurate, real-time results. The model actually searches Facebook to find current URLs rather than relying on training data.
+### Batch Estimates
+| Businesses | Google API | OpenAI API | **Total** |
+|------------|-----------|-----------|---------|
+| **100** | FREE | ~$0.01 | **~$0.01** (free tier) |
+| **1,000** | ~$5 | ~$0.14 | **~$5.14** |
+| **10,000** | ~$50 | ~$1.40 | **~$51.40** |
+
+**AI filtering adds less than 3% to total cost** while dramatically improving accuracy!
 
 ## ⚠️ Important Notes
 
-1. **API Key Security**: Never commit your `.env` file or share your API key
-2. **Rate Limits**: OpenAI has rate limits based on your account tier
-3. **Search Accuracy**: Results depend on OpenAI's search capabilities and may not be 100% accurate
-4. **Manual Review**: Always review low-confidence results manually
-5. **Facebook Changes**: Facebook URL structures may change over time
+1. **API Key Security**: Never commit your `.env` file or share your API credentials
+2. **Required API Keys**: 
+   - **Google API Key** + **CSE ID** (for search results)
+   - **OpenAI API Key** (for AI-powered filtering)
+   - Tool falls back to rule-based filtering if OpenAI key is missing
+3. **Rate Limits**: 
+   - Google API free tier: 100 queries/day
+   - OpenAI API: Based on your tier (usually sufficient)
+   - Paid tier: Higher limits based on billing
+4. **Search Accuracy**: 
+   - Google provides real-time search results
+   - AI agent provides intelligent filtering with reasoning
+   - Results include detailed AI explanation in Notes column
+5. **Manual Review**: Always review low-confidence results (< 0.6) manually
+6. **Facebook Changes**: Facebook URL structures may change over time
+7. **Custom Search Engine Setup**: Make sure your CSE is configured to search `www.facebook.com/*` only
+8. **AI Reasoning**: Check the "Notes" column to understand why each URL was selected
 
 ## 🐛 Troubleshooting
 
-### "OPENAI_API_KEY not set" warning
+### "GOOGLE_API_KEY not set" or "GOOGLE_CSE_ID not set" warning
 
-- Make sure you created a `.env` file with your API key
-- Or set the environment variable before running the script
+- Make sure you created a `.env` file with both credentials
+- Or set the environment variables before running the script
+- Verify your API key is valid and Custom Search API is enabled in Google Cloud Console
+
+### "Google API error: ..." errors
+
+- **Quota exceeded**: You've hit the free tier limit (100/day) or paid quota
+  - Wait for quota reset or upgrade to paid tier
+- **API not enabled**: Enable Custom Search API in Google Cloud Console
+- **Invalid CSE ID**: Verify your Custom Search Engine ID is correct
+- **Invalid API key**: Check your API key in Google Cloud Console
 
 ### "Rate limit exceeded" error
 
-- Your OpenAI account has reached its rate limit
-- Reduce concurrency in `main.py` (line ~180)
-- Increase delay between requests
+- Increase the delay between requests in `main.py` (around line 454)
+- Default is 0.5 seconds, try increasing to 1-2 seconds
 
 ### File upload fails
 
@@ -298,5 +421,5 @@ For issues or questions:
 
 ---
 
-**Made with ❤️ using OpenAI API and FastAPI**
+**Made with ❤️ using Google Custom Search JSON API and FastAPI**
 

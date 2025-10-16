@@ -42,3 +42,8 @@ results_*.csv
 .DS_Store
 Thumbs.db
 
+# Files
+HETZNER_DEPLOYMENT.md
+samples/
+
+
