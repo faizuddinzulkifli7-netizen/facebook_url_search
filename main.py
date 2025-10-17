@@ -38,6 +38,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Mount static files for favicon
+app.mount("/static", StaticFiles(directory="Favico"), name="static")
+
 # Global storage for processing status (in production, use Redis or database)
 processing_status = {}
 
@@ -109,41 +112,25 @@ async def ai_filter_and_select_url(
     search_results: List[Dict],
     business_name: str,
     location: str,
-    openai_key: Optional[str] = None
+    openai_key: str
 ) -> Dict:
     """
     Use AI agent to intelligently filter and select the best Facebook URL
     Returns the best match with reasoning
+    Requires OpenAI API key
     """
     
-    # Try to use provided key, fallback to global client
-    client = None
-    if openai_key:
-        try:
-            client = AsyncOpenAI(api_key=openai_key)
-        except:
-            pass
-    
-    if not client and not openai_client:
-        # AI not available - return first result as fallback
-        if search_results:
-            first = search_results[0]
-            return {
-                "facebook_url": first['url'],
-                "type": "unknown",
-                "confidence": 0.5,
-                "notes": f"AI unavailable - returning first result: {first.get('title', '')}"
-            }
+    # Use provided API key to create client
+    try:
+        client = AsyncOpenAI(api_key=openai_key)
+    except Exception as e:
+        # If client creation fails, return error
         return {
-            "facebook_url": "Not found",
-            "type": "not_found",
+            "facebook_url": "Error",
+            "type": "error",
             "confidence": 0.0,
-            "notes": "No results found"
+            "notes": f"Failed to initialize OpenAI client: {str(e)}"
         }
-    
-    # Use provided client or global client
-    if not client:
-        client = openai_client
     
     # Prepare search results for AI analysis
     results_text = []
@@ -323,7 +310,7 @@ async def search_facebook_page_google(
     location: str,
     api_key: str,
     cse_id: str,
-    openai_key: Optional[str] = None,
+    openai_key: str,
     country_code: str = "us",
     language: str = "en",
     num_results: int = 20
@@ -331,6 +318,7 @@ async def search_facebook_page_google(
     """
     Use Google Custom Search JSON API to find Facebook business page or group
     Returns structured data with URL, type, confidence, and notes
+    Requires OpenAI API key for AI-powered filtering
     """
     
     try:
@@ -418,13 +406,13 @@ async def process_batch_with_config(
     task_id: str,
     api_key: str,
     cse_id: str,
-    openai_key: Optional[str] = None,
+    openai_key: str,
     country_code: str = "us",
     language: str = "en"
 ):
     """
     Process multiple records one by one sequentially with progress tracking
-    Uses user-provided API credentials
+    Uses user-provided API credentials (all required)
     """
     results = []
     total = len(records)
@@ -503,6 +491,14 @@ async def home():
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Facebook URL Search Tool - Google API</title>
+    
+    <!-- Favicon -->
+    <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
+    <link rel="icon" type="image/png" sizes="512x512" href="/static/favicon-512.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
+    
     <style>
         * {
             margin: 0;
@@ -830,9 +826,9 @@ async def home():
                 </div>
             </div>
             <div class="form-group">
-                <label for="openaiKey">OpenAI API Key (Optional - for AI filtering)</label>
+                <label for="openaiKey">OpenAI API Key *</label>
                 <div class="password-toggle">
-                    <input type="password" id="openaiKey" class="autocomplete-input" placeholder="Enter your OpenAI API Key (optional)">
+                    <input type="password" id="openaiKey" class="autocomplete-input" placeholder="Enter your OpenAI API Key">
                     <button type="button" class="password-toggle-btn" onclick="togglePasswordVisibility('openaiKey')">👁️</button>
                 </div>
             </div>
@@ -841,7 +837,7 @@ async def home():
         <div class="instructions">
             <h3>📋 Instructions:</h3>
             <ul>
-                <li>Enter your Google API credentials above (required)</li>
+                <li>Enter your API credentials above (all required: Google API Key, CSE ID, OpenAI API Key)</li>
                 <li>Configure Google search property (country) and language</li>
                 <li>Upload a CSV or Excel file with two columns: <strong>business_name</strong> and <strong>location</strong></li>
                 <li>Google Search API retrieves Facebook results, AI Agent intelligently filters and selects the best match</li>
@@ -856,7 +852,7 @@ async def home():
                 <div class="form-group">
                     <label for="countryCode">Country Code *</label>
                     <input type="text" id="countryCode" class="autocomplete-input" list="countryList" 
-                           placeholder="Type to search (e.g., us, it, uk)" value="us">
+                           placeholder="Type to search (e.g., United States, Italy, United Kingdom)">
                     <datalist id="countryList">
                         <option value="af">Afghanistan</option>
                         <option value="al">Albania</option>
@@ -1102,7 +1098,7 @@ async def home():
                 <div class="form-group">
                     <label for="language">Interface Language *</label>
                     <input type="text" id="language" class="autocomplete-input" list="languageList" 
-                           placeholder="Type to search (e.g., en, it, fr)" value="en">
+                           placeholder="Type to search (e.g., English, Italian, French)">
                     <datalist id="languageList">
                         <option value="af">Afrikaans</option>
                         <option value="sq">Albanian</option>
@@ -1230,6 +1226,102 @@ async def home():
     <script>
         let selectedFile = null;
         let currentTaskId = null;
+        let selectedCountryCode = 'us';
+        let selectedLanguageCode = 'en';
+        
+        // Build country code to name mapping
+        const countryMap = {};
+        const countryOptions = document.querySelectorAll('#countryList option');
+        countryOptions.forEach(option => {
+            countryMap[option.value] = option.textContent;
+        });
+        
+        // Build language code to name mapping
+        const languageMap = {};
+        const languageOptions = document.querySelectorAll('#languageList option');
+        languageOptions.forEach(option => {
+            languageMap[option.value] = option.textContent;
+        });
+        
+        // Handle country code selection (only when user selects from datalist)
+        document.getElementById('countryCode').addEventListener('change', function(e) {
+            const value = e.target.value.toLowerCase().trim();
+            // Check if it's a valid code
+            if (countryMap[value]) {
+                selectedCountryCode = value;
+                e.target.value = countryMap[value]; // Update display to full name
+            } else {
+                // Check if user entered the full name, find the code
+                for (const [code, name] of Object.entries(countryMap)) {
+                    if (name.toLowerCase() === e.target.value.toLowerCase().trim()) {
+                        selectedCountryCode = code;
+                        e.target.value = name; // Ensure proper capitalization
+                        break;
+                    }
+                }
+            }
+        });
+        
+        // Handle country code blur - ensure display shows full name
+        document.getElementById('countryCode').addEventListener('blur', function(e) {
+            const value = e.target.value.toLowerCase().trim();
+            // Check if it's a valid code
+            if (countryMap[value]) {
+                selectedCountryCode = value;
+                e.target.value = countryMap[value];
+            } else {
+                // Check if user entered the full name, find the code
+                for (const [code, name] of Object.entries(countryMap)) {
+                    if (name.toLowerCase() === value) {
+                        selectedCountryCode = code;
+                        e.target.value = name;
+                        break;
+                    }
+                }
+            }
+        });
+        
+        // Handle language selection (only when user selects from datalist)
+        document.getElementById('language').addEventListener('change', function(e) {
+            const value = e.target.value.toLowerCase().trim();
+            // Check if it's a valid code
+            if (languageMap[value]) {
+                selectedLanguageCode = value;
+                e.target.value = languageMap[value]; // Update display to full name
+            } else {
+                // Check if user entered the full name, find the code
+                for (const [code, name] of Object.entries(languageMap)) {
+                    if (name.toLowerCase() === e.target.value.toLowerCase().trim()) {
+                        selectedLanguageCode = code;
+                        e.target.value = name; // Ensure proper capitalization
+                        break;
+                    }
+                }
+            }
+        });
+        
+        // Handle language blur - ensure display shows full name
+        document.getElementById('language').addEventListener('blur', function(e) {
+            const value = e.target.value.toLowerCase().trim();
+            // Check if it's a valid code
+            if (languageMap[value]) {
+                selectedLanguageCode = value;
+                e.target.value = languageMap[value];
+            } else {
+                // Check if user entered the full name, find the code
+                for (const [code, name] of Object.entries(languageMap)) {
+                    if (name.toLowerCase() === value) {
+                        selectedLanguageCode = code;
+                        e.target.value = name;
+                        break;
+                    }
+                }
+            }
+        });
+        
+        // Initialize display with full names
+        document.getElementById('countryCode').value = countryMap['us'] || 'United States';
+        document.getElementById('language').value = languageMap['en'] || 'English';
         
         // Password toggle functionality
         function togglePasswordVisibility(inputId) {
@@ -1254,14 +1346,16 @@ async def home():
         function updateProcessButtonState() {
             const apiKey = document.getElementById('apiKey').value.trim();
             const cseId = document.getElementById('cseId').value.trim();
+            const openaiKey = document.getElementById('openaiKey').value.trim();
             const hasFile = selectedFile !== null;
             
-            document.getElementById('processBtn').disabled = !(apiKey && cseId && hasFile);
+            document.getElementById('processBtn').disabled = !(apiKey && cseId && openaiKey && hasFile);
         }
         
         // Add listeners to API credential inputs
         document.getElementById('apiKey').addEventListener('input', updateProcessButtonState);
         document.getElementById('cseId').addEventListener('input', updateProcessButtonState);
+        document.getElementById('openaiKey').addEventListener('input', updateProcessButtonState);
         
         // Drag and drop handlers
         const uploadSection = document.getElementById('uploadSection');
@@ -1305,15 +1399,14 @@ async def home():
             // Validate API credentials
             const apiKey = document.getElementById('apiKey').value.trim();
             const cseId = document.getElementById('cseId').value.trim();
-            const countryCode = document.getElementById('countryCode').value.trim();
-            const language = document.getElementById('language').value.trim();
+            const openaiKey = document.getElementById('openaiKey').value.trim();
             
-            if (!apiKey || !cseId) {
-                alert('Please enter both Google API Key and CSE ID');
+            if (!apiKey || !cseId || !openaiKey) {
+                alert('Please enter all required API credentials: Google API Key, CSE ID, and OpenAI API Key');
                 return;
             }
             
-            if (!countryCode || !language) {
+            if (!selectedCountryCode || !selectedLanguageCode) {
                 alert('Please select country code and language');
                 return;
             }
@@ -1322,9 +1415,9 @@ async def home():
             formData.append('file', selectedFile);
             formData.append('api_key', apiKey);
             formData.append('cse_id', cseId);
-            formData.append('openai_key', document.getElementById('openaiKey').value.trim() || '');
-            formData.append('country_code', countryCode);
-            formData.append('language', language);
+            formData.append('openai_key', openaiKey);
+            formData.append('country_code', selectedCountryCode);  // Use the code, not the display name
+            formData.append('language', selectedLanguageCode);     // Use the code, not the display name
             
             document.getElementById('processBtn').disabled = true;
             document.getElementById('progressSection').style.display = 'block';
@@ -1378,8 +1471,10 @@ async def home():
             document.getElementById('resultsSection').style.display = 'block';
             
             const config = data.config || {};
+            const countryName = countryMap[config.country_code] || config.country_code || 'United States';
+            const languageName = languageMap[config.language] || config.language || 'English';
             document.getElementById('resultsSummary').textContent = 
-                `Processed ${data.total} records successfully using country: ${config.country_code || 'us'}, language: ${config.language || 'en'}`;
+                `Processed ${data.total} records successfully using country: ${countryName}, language: ${languageName}`;
             
             // Check for not found results
             checkNotFoundResults();
@@ -1476,7 +1571,7 @@ async def upload_file(
     file: UploadFile = File(...),
     api_key: str = Form(...),
     cse_id: str = Form(...),
-    openai_key: str = Form(""),
+    openai_key: str = Form(...),
     country_code: str = Form("us"),
     language: str = Form("en")
 ):
@@ -1485,8 +1580,8 @@ async def upload_file(
     """
     try:
         # Validate API credentials
-        if not api_key or not cse_id:
-            raise HTTPException(status_code=400, detail="Google API Key and CSE ID are required")
+        if not api_key or not cse_id or not openai_key:
+            raise HTTPException(status_code=400, detail="Google API Key, CSE ID, and OpenAI API Key are all required")
         
         # Read file content
         content = await file.read()
@@ -1522,7 +1617,7 @@ async def upload_file(
             task_id,
             api_key,
             cse_id,
-            openai_key if openai_key else None,
+            openai_key,
             country_code,
             language
         )
